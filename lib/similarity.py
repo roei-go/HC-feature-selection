@@ -1,21 +1,9 @@
-import os
-import sys
-import scipy
-import pandas as pd
 import numpy as np
-from matplotlib import pyplot as plt
-from tqdm import tqdm
-
+from sklearn.metrics.pairwise import euclidean_distances
+from scipy.special import softmax
 from scipy.stats import f as fdist
-from scipy.stats import t as tdist
-from scipy.stats import norm
-from scipy.stats import ttest_ind as ttest
-
-from twosample import bin_allocation_test
 from multitest import MultiTest
-from typing import List
-
-from sklearn.metrics import pairwise_distances
+from sklearn.preprocessing import normalize
 
 class CentroidSimilarity(object):
     """
@@ -25,12 +13,12 @@ class CentroidSimilarity(object):
     classes. We store the class centroids (averages).
 
     At prediction, we give the highest probability to the class
-    that is most similar to the test sample (in Eucleadian distance
+    that is most similar to the test sample (in Euclidian distance
     or cosine similarity).
 
     """
 
-    def __init__(self,hc_gamma=0.2,print_shapes=False):
+    def __init__(self,hc_gamma=0.2, use_euclidian_distance=False, print_shapes=False):
         self.global_mean = None
         self.classes = None
         self.cls_mean = None
@@ -38,13 +26,14 @@ class CentroidSimilarity(object):
         self.gamma = hc_gamma
         self.num_selected_features = 0
         self.print_shapes = print_shapes
+        self.use_euclidian_distance = use_euclidian_distance
 
     def fit(self, X, y):
         """
 
         Args:
-        :param X:  training data as a matrix n X p of n samples with p features each
-        :param y:  labels. For multi-label, simply pass the same x value with different labels.
+        :param X:  training data with shape (n_samples, n_features)
+        :param y:  target values with shape (n_samples,)
 
         """
         self.classes = np.unique(y)
@@ -72,23 +61,40 @@ class CentroidSimilarity(object):
         means = self.cls_mean * mask
         self.mask = mask
         # compute the classifier centroids
-        self.mat = (means.T / np.linalg.norm(means, axis=1)).T
+        self.centroids = normalize(means, norm='l2')
         
 
-    def prob_func(self, response):
+    def sigmoid(self, response):
         return np.exp(response) / (1 + np.exp(response))
 
     def get_centroids(self):
-        return self.mat * self.mask
+        return self.centroids # * self.mask
+
+    def get_dist_from_centroids(self, X):
+        """
+        computes the euclidian distance of the instances (point) of input X from the classifier centroids
+        Args:
+            X: ndarray with shape (n_samples, n_features)
+
+        Returns:
+            distances - ndarray of shape (n_samples_X, num_classes)
+
+        """
+        centroids = self.cls_mean * self.mask
+        return euclidean_distances(X, centroids)
 
     def predict_log_proba(self, X):
         # perform an inner product of the input with the centroids. since the centroids are normalized to have unit length,
         # this is equivalent to a cosine similarity between the input and the centroids
         response = X @ self.get_centroids().T
-        return self.prob_func(response)
+        return self.sigmoid(response)
 
     def predict(self, X):
-        probs = self.predict_log_proba(X)
+        if self.use_euclidian_distance:
+            distances = self.get_dist_from_centroids(X)
+            probs = softmax(distances, axis=1)
+        else:
+            probs = self.predict_log_proba(X)
         return self.classes[np.argmax(probs, 1)]  # max inner product
 
     def eval_accuracy(self, X, y):
@@ -136,19 +142,15 @@ class CentroidSimilarityFeatureSelection(CentroidSimilarity):
         for the given class
         """
 
-        mu1 = self.cls_mean[cls_id]
-        n1 = self.cls_n[cls_id]
-        std1 = self.cls_std[cls_id]
-        # get the total number of samples by summing the number of samples in each class
-        nG = self.cls_n.sum(0)
-        stdG = self.global_std
-        muG = self.global_mean
-
         assert (method in ['one_vs_all', 'diversity_pursuit'])
         if method == 'one_vs_all':
-            pvals, _, _ = one_vs_all_anova(n1, nG, mu1, muG, std1, stdG)
+            pvals, _, _ = self.one_vs_all_anova(num_smpls_in_cls=self.cls_n[cls_id],
+                                                total_num_smpls=self.cls_n.sum(0),
+                                                cls_mean=self.cls_mean[cls_id],
+                                                global_mean=self.global_mean,
+                                                global_std=self.global_std)
         if method == 'diversity_pursuit':
-            pvals, _, _ = diversity_pursuit_anova(self.cls_n,
+            pvals, _, _ = self.diversity_pursuit_anova(self.cls_n,
                                                   self.cls_mean,
                                                   self.cls_std,
                                                   self.print_shapes)
@@ -164,69 +166,93 @@ class CentroidSimilarityFeatureSelection(CentroidSimilarity):
         returns:
         mask - a binary vector with shape (1,p) where p is the number of features 
         """
-        pvals = self.get_pvals(cls_id, method=method)
+        if method == 'union':
+            one_vs_all_mask = self.get_cls_mask(cls_id=cls_id, method='one_vs_all')
+            diversity_pursuit_mask = self.get_cls_mask(cls_id=cls_id, method='diversity_pursuit')
+            mask = np.logical_or(one_vs_all_mask, diversity_pursuit_mask)
+        elif method == 'diversity_pursuit_no_ova':
+            one_vs_all_mask = self.get_cls_mask(cls_id=cls_id, method='one_vs_all')
+            diversity_pursuit_mask = self.get_cls_mask(cls_id=cls_id, method='diversity_pursuit')
+            mask = np.logical_and(np.logical_not(one_vs_all_mask), diversity_pursuit_mask)
 
-        mt = MultiTest(pvals)
-        hc, hct = mt.hc_star(gamma=self.gamma)
-        self.cls_response[cls_id] = hc
-        mask = pvals < hct
+        else:
+            pvals = self.get_pvals(cls_id, method=method)
+            mt = MultiTest(pvals)
+            self.hc, self.hct = mt.hc_star(gamma=self.gamma)
+            self.cls_response[cls_id] = self.hc
+            mask = pvals < self.hct
         return mask
 
-def diversity_pursuit_anova(classes_num_samples, cls_mean, cls_std, print_shapes=False):
-    """
-    F-test for discovering discriminating features
-    The test is vectorized along the last dimension where different entries corresponds to different features
+    def diversity_pursuit_anova(self,classes_num_samples, cls_mean, cls_std, print_shapes=False):
+        """
+        F-test for discovering discriminating features
+        The test is vectorized along the last dimension where different entries corresponds to different features
 
-    Args:
-    -----
-    :param classes_num_samples:  vector indicating the number of elements in each class
-    :param cls_mean:  matrix of classes means with shape (k,p); the (i,j) entry is the class i mean in feature j
-    :param cls_std:  matrix of standard errors; the (i,j) entry is the standard
-          error of class i in feature j
+        Args:
+        -----
+        :param classes_num_samples:  vector indicating the number of elements in each class
+        :param cls_mean:  matrix of classes means with shape (k,p); the (i,j) entry is the class i mean in feature j
+        :param cls_std:  matrix of standard errors; the (i,j) entry is the standard
+              error of class i in feature j
 
-    """
-    # compute the per feature global mean - the mean of all the data for each feature. shape = (1,p)
-    global_mean = np.expand_dims(np.sum(cls_mean * classes_num_samples, 0) / np.sum(classes_num_samples, 0),axis=0)
-    # compute the "between groups" sum of squares
-    SSbetween = np.sum(classes_num_samples * (cls_mean - global_mean) ** 2, 0)
-    SSwithin = np.sum((classes_num_samples-1) * (cls_std ** 2), 0)
-    if print_shapes:
-        print("in function diversity_pursuit_anova:")
-        print(f"classes_num_samples.shape = {classes_num_samples.shape}")
-        print(f"cls_std.shape = {cls_std.shape}")
-        print(f"cls_mean.shape = {cls_mean.shape}")
-        print(f"global_mean.shape = {global_mean.shape}")
-        print(f"SSwithin.shape = {SSwithin.shape}")
-        print(f"SSbetween.shape = {SSbetween.shape}")
-    
-    # the numerator number of degrees of freedom is actually k-1 (k is the number of groups/classes)
-    dfn = len(classes_num_samples) - 1
-    # the denominator number of degrees of freedom is n-k (n is the total number of samples)
-    dfd = np.sum(classes_num_samples, 0) - len(classes_num_samples)
+        """
+        # compute the per feature global mean - the mean of all the data for each feature. shape = (1,p)
+        #global_mean = np.expand_dims(np.sum(cls_mean * classes_num_samples, 0) / np.sum(classes_num_samples, 0),axis=0)
+        # compute the "between groups" sum of squares
+        SSbetween = np.sum(classes_num_samples * (cls_mean - self.global_mean) ** 2, 0)
+        SSwithin = np.sum((classes_num_samples-1) * (cls_std ** 2), 0)
+        if print_shapes:
+            print("in function diversity_pursuit_anova:")
+            print(f"classes_num_samples.shape = {classes_num_samples.shape}")
+            print(f"cls_std.shape = {cls_std.shape}")
+            print(f"cls_mean.shape = {cls_mean.shape}")
+            print(f"global_mean.shape = {self.global_mean.shape}")
+            print(f"SSwithin.shape = {SSwithin.shape}")
+            print(f"SSbetween.shape = {SSbetween.shape}")
 
-    f_stat = (SSbetween / dfn) / (SSwithin / dfd)
-    return fdist.sf(f_stat, dfn, dfd), SSbetween, SSwithin
+        # the numerator number of degrees of freedom is actually k-1 (k is the number of groups/classes)
+        dfn = len(classes_num_samples) - 1
+        # the denominator number of degrees of freedom is n-k (n is the total number of samples)
+        dfd = np.sum(classes_num_samples, 0) - len(classes_num_samples)
+        # initialize the F statistics vector to 0 (for all features)
+        f_stat = np.zeros_like(SSbetween)
+        # run over all features and identify points where infinity will occur - assign an infinite F statistic there
+        for i in range(SSwithin.shape[0]):
+            if SSwithin[i] == 0 and SSbetween[i] > 0:
+                f_stat[i] = 1e8
+
+        f_stat = np.divide((SSbetween / dfn), (SSwithin / dfd), out=f_stat, where=(SSwithin != 0))
+        return fdist.sf(f_stat, dfn, dfd), SSbetween, SSwithin
 
 
-def one_vs_all_anova(n1, nG, mu1, muG, std1, stdG):
-    """
-    :param n1: number of samples from the isolated class
-    :param nG: total number of samples (all classes)
-    :param mu1: mean response of the isolated class samples
-    :param muG: mean response of all samples
-    :param std1: standard deviation of the isolated class samples response
-    :param stdG: standard deviation of all samples response
-    :return:
-    """
-    # get the number of samples in all other classes except the isolated class
-    n2 = nG - n1
-    # get the mean response in all other classes except the isolated class
-    mu2 = (muG * nG - mu1 * n1) / (nG - n1)
-    # compute the "between groups" sum of squares
-    SSbetween = n1 * (mu1 - muG) ** 2 + n2 * (mu2 - muG) ** 2
-    SStot = stdG ** 2 * (nG - 1)
-    # using the sum of squares decomposition to compute the variability within each group
-    SSwithin = SStot - SSbetween
-    # calculate the F-statistic
-    f_stat = (SSbetween / 1) / (SSwithin / (nG - 2))
-    return fdist.sf(f_stat, 1, nG - 2), SSbetween, SSwithin
+    def one_vs_all_anova(self,num_smpls_in_cls, total_num_smpls, cls_mean, global_mean, global_std):
+        """
+        In this method the data is partitioned to two groups: one with samples from a given class (the isolated class), and one part with the rest
+        of the samples. Then, a one-way ANOVA test is performed for each feature between these two groups.
+        :param num_smpls_in_cls: number of samples from the isolated class
+        :param total_num_smpls: total number of samples (all classes)
+        :param cls_mean: mean of the isolated class samples (basically the un-normalized class centroid)
+        :param global_mean: global mean of all samples in the data
+        :param global_std: standard deviation of each feature, over all samples in the data
+        :return:
+        """
+        # get the number of samples in all other classes except the isolated class
+        num_smpls_in_rest = total_num_smpls - num_smpls_in_cls
+        # get the mean response in all other classes except the isolated class
+        mean_smpls_in_rest = (global_mean * total_num_smpls - cls_mean * num_smpls_in_cls) / num_smpls_in_rest
+        # compute the "between groups" sum of squares
+        SSbetween = num_smpls_in_cls * (cls_mean - global_mean) ** 2 + num_smpls_in_rest * (mean_smpls_in_rest - global_mean) ** 2
+        SStot = global_std ** 2 * (total_num_smpls - 1)
+        # using the sum of squares decomposition to compute the variability within each group
+        SSwithin = SStot - SSbetween
+        # calculate the F-statistic
+        assert (total_num_smpls > 2).all(), "total number of samples must be greater then number of groups"
+        # initialize the F statistics vector to 0 (for all features)
+        f_stat = np.zeros_like(SSbetween)
+        # run over all features and identify points where infinity will occur - assign an infinite F statistic there
+        for i in range(SSwithin.shape[0]):
+            if SSwithin[i] == 0 and SSbetween[i] > 0:
+                f_stat[i] = 1e8
+
+        f_stat = np.divide(SSbetween,(SSwithin / (total_num_smpls - 2)), out=f_stat, where=(SSwithin!=0))
+        return fdist.sf(f_stat, 1, total_num_smpls - 2), SSbetween, SSwithin
