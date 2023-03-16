@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
-def plot_hist(arrays,bins,xlabel,title,log_scale=False,labels=None):
-    fig, ax = plt.subplots(figsize=(6, 6))
+def plot_hist(ax,arrays,bins,xlabel,title,log_scale=False,labels=None):
     for i in range(len(arrays)):
         if labels is not None:
             label = labels[i]
@@ -13,7 +12,7 @@ def plot_hist(arrays,bins,xlabel,title,log_scale=False,labels=None):
     ax.set_title(title)
     if labels is not None:
         ax.legend()
-    plt.show()
+
 
 def bar_plot_scores(scores, bar_labels, xticklabels, xlabel, ylabel, title):
     fig, ax = plt.subplots(figsize=(12, 6))

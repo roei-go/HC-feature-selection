@@ -27,6 +27,8 @@ def multiple_classifiers_fit_predict(classifiers, X_train, y_train, X_test, y_te
         # the feature selector is re-fitted to the data
         if hasattr(classifiers[i], 'feature_selector'):
             classifiers[i].feature_selector.selected_features = None
+        if hasattr(classifiers[i], 'predict_random'):
+            classifiers[i].predict_random = False
         classifiers[i].fit(X_train, y_train)
         if hasattr(classifiers[i], 'feature_selector'):
             num_features[i] = classifiers[i].feature_selector.selected_features.shape[0]
