@@ -110,6 +110,7 @@ class FeatureSelectionDiversityPursuitAnova(FeatureSelectionBase):
             print(f"In feature selector {self.__class__.__name__}, number of nan features = {np.sum(nan_f_stat_idx)}")
         # get indices for the rest of the features
         features_for_test_idx = np.array(list(set(range(self.num_features)) - set(np.flatnonzero(inf_f_stat_idx)) - set(np.flatnonzero(nan_f_stat_idx))))
+        #features_for_test_idx = np.array(list(set(range(self.num_features)) - set(np.flatnonzero(nan_f_stat_idx))))
         return inf_f_stat_idx, nan_f_stat_idx, features_for_test_idx
 
     def test_func(self,groups):
@@ -154,10 +155,10 @@ class FeatureSelectionDiversityPursuitKruskal(FeatureSelectionDiversityPursuitAn
                 f_stat[j] = 0
                 pvals[j] = 1
         # The kruskal H statistic cannot be infinite when at least some of the observations are different.
-        inf_f_stat_idx = np.array([])
+        inf_f_stat_idx = np.zeros((num_features,), dtype=bool)
         # get the indice of the "nan" H statistic
         nan_f_stat_idx = np.flatnonzero((pvals == 1))
-        features_for_test_idx = np.array(list(set(range(self.num_features)) - set(inf_f_stat_idx) - set(np.flatnonzero(nan_f_stat_idx))))
+        features_for_test_idx = np.array(list(set(range(self.num_features)) - set(np.flatnonzero(inf_f_stat_idx)) - set(np.flatnonzero(nan_f_stat_idx))))
         features_for_test_f_stat = f_stat[features_for_test_idx]
         features_for_test_pvals = pvals[features_for_test_idx]
         return features_for_test_f_stat, features_for_test_pvals, inf_f_stat_idx, nan_f_stat_idx, features_for_test_idx
