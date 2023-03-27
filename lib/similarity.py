@@ -80,7 +80,7 @@ class CentroidSimilarity(object):
             distances - ndarray of shape (n_samples_X, num_classes)
 
         """
-        centroids = self.cls_mean * self.mask
+        centroids = self.cls_mean
         return euclidean_distances(X, centroids)
 
     def predict_log_proba(self, X):
