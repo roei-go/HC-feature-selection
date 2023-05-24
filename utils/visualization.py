@@ -14,13 +14,16 @@ def plot_hist(ax,arrays,bins,xlabel,title,log_scale=False,labels=None):
         ax.legend()
 
 
-def bar_plot_scores(scores, bar_labels, xticklabels, xlabel, ylabel, title):
+def bar_plot_scores(scores, bar_labels, xticklabels, xlabel, ylabel, title, err=None):
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.set_xticks(np.arange(scores.shape[1]))
     width = 1/(2*scores.shape[0])
     bar_distances = np.arange(scores.shape[0]) - scores.shape[0]/2
     for i in range(scores.shape[0]):
-        ax.bar(x=np.arange(scores.shape[1]) - bar_distances[i]*width, height=scores[i,:], width=width, label=bar_labels[i])
+        if err is not None:
+            ax.bar(x=np.arange(scores.shape[1]) - bar_distances[i] * width, height=scores[i, :], width=width, label=bar_labels[i], yerr=err[i, :])
+        else:
+            ax.bar(x=np.arange(scores.shape[1]) - bar_distances[i]*width, height=scores[i,:], width=width, label=bar_labels[i])
     ax.set_xlabel(xlabel)
     ax.set_xticklabels(xticklabels)
     ax.set_ylabel(ylabel)
