@@ -1,6 +1,6 @@
 import numpy as np
 
-def sample_centroids(num_classes, num_features, eps, power, non_nulls_location='free'):
+def sample_centroids(num_classes, num_features, eps, power, non_nulls_location='free', return_active_features=False):
     """
     Randomly sample sparse class means
     
@@ -15,18 +15,30 @@ def sample_centroids(num_classes, num_features, eps, power, non_nulls_location='
                             if 'fixed', non-null features are
                             the same across all classes
     """
+    active_features = []
     if non_nulls_location == 'fixed':
-        idcs = np.random.rand(num_features) < eps
-        
+        num_active_features = int(eps * num_features) + 1
+        idcs = np.zeros((num_features,)).astype(bool)
+        #idcs = np.random.rand(num_features) < eps
+        active_features_idx = np.random.choice(np.arange(num_features), size=num_active_features, replace=False)
+        idcs[active_features_idx] = True
+        if return_active_features:
+            #active_features = np.flatnonzero(idcs)
+            active_features = active_features_idx
+
     centroids = np.zeros((num_classes, num_features))
     # running over classes
     for i in range(num_classes):
         # randomly set the indices of non-null features
         if non_nulls_location == 'free':
             idcs = np.random.rand(num_features) < eps
-        # make some of the non-null features negative and some positive
+            active_features.extend(list(np.flatnonzero(idcs)))
+        # make some non-null features negative and some positive
         centroids[i][idcs] = power * (1-2*(np.random.rand(np.sum(idcs)) > .5)) / 2
-    return centroids
+    if return_active_features:
+        return centroids, list(set(active_features))
+    else:
+        return centroids
 
 
 def sample_normal_clusters(centroids, n, sigma):
