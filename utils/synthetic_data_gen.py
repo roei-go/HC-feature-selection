@@ -15,16 +15,13 @@ def sample_centroids(num_classes, num_features, eps, power, non_nulls_location='
                             if 'fixed', non-null features are
                             the same across all classes
     """
-    active_features = []
+
     if non_nulls_location == 'fixed':
         num_active_features = int(eps * num_features) + 1
         idcs = np.zeros((num_features,)).astype(bool)
         #idcs = np.random.rand(num_features) < eps
         active_features_idx = np.random.choice(np.arange(num_features), size=num_active_features, replace=False)
         idcs[active_features_idx] = True
-        if return_active_features:
-            #active_features = np.flatnonzero(idcs)
-            active_features = active_features_idx
 
     centroids = np.zeros((num_classes, num_features))
     # running over classes
@@ -32,11 +29,14 @@ def sample_centroids(num_classes, num_features, eps, power, non_nulls_location='
         # randomly set the indices of non-null features
         if non_nulls_location == 'free':
             idcs = np.random.rand(num_features) < eps
-            active_features.extend(list(np.flatnonzero(idcs)))
+
         # make some non-null features negative and some positive
         centroids[i][idcs] = power * (1-2*(np.random.rand(np.sum(idcs)) > .5)) / 2
     if return_active_features:
-        return centroids, list(set(active_features))
+        # find the actual indices where the centroids differ from one another
+        centroids_std = np.std(centroids, axis=0)
+        active_features = list(np.flatnonzero(centroids_std))
+        return centroids, active_features
     else:
         return centroids
 
