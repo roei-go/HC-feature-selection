@@ -1,5 +1,5 @@
 import numpy as np
-from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.metrics.pairwise import euclidean_distances, cosine_similarity
 from scipy.special import softmax
 from scipy.stats import f as fdist
 from multitest import MultiTest
@@ -18,7 +18,7 @@ class CentroidSimilarity(object):
 
     """
 
-    def __init__(self,hc_gamma=0.2, use_euclidian_distance=False, print_shapes=False):
+    def __init__(self, hc_gamma=0.2, use_euclidian_distance=False, print_shapes=False):
         self.global_mean = None
         self.classes = None
         self.cls_mean = None
@@ -27,6 +27,7 @@ class CentroidSimilarity(object):
         self.num_selected_features = 0
         self.print_shapes = print_shapes
         self.use_euclidian_distance = use_euclidian_distance
+        self.__name__ = 'CentroidSimilarity'
 
     def fit(self, X, y):
         """
@@ -61,8 +62,9 @@ class CentroidSimilarity(object):
         means = self.cls_mean * mask
         self.mask = mask
         # compute the classifier centroids
-        self.centroids = normalize(means, norm='l2')
-        
+        #self.centroids = normalize(means, norm='l2')
+        self.centroids = means
+
 
     def sigmoid(self, response):
         return np.exp(response) / (1 + np.exp(response))
@@ -80,22 +82,22 @@ class CentroidSimilarity(object):
             distances - ndarray of shape (n_samples_X, num_classes)
 
         """
-        centroids = self.cls_mean
-        return euclidean_distances(X, centroids)
+        return euclidean_distances(X, self.get_centroids())
 
     def predict_log_proba(self, X):
-        # perform an inner product of the input with the centroids. since the centroids are normalized to have unit length,
-        # this is equivalent to a cosine similarity between the input and the centroids
-        response = X @ self.get_centroids().T
+        if self.use_euclidian_distance:
+            D = self.get_dist_from_centroids(X)
+            response = np.exp(-D)
+        else:
+            # perform an inner product of the input with the centroids. since the centroids are normalized to have unit length,
+            # this is equivalent to a cosine similarity between the input and the centroids
+            #response = X @ self.get_centroids().T
+            response = cosine_similarity(X, self.get_centroids())
         return self.sigmoid(response)
 
     def predict(self, X):
-        if self.use_euclidian_distance:
-            distances = self.get_dist_from_centroids(X)
-            probs = softmax(distances, axis=1)
-        else:
-            probs = self.predict_log_proba(X)
-        return self.classes[np.argmax(probs, 1)]  # max inner product
+        probs = self.predict_log_proba(X)
+        return self.classes[np.argmax(probs, 1)]
 
     def eval_accuracy(self, X, y):
         y_pred = self.predict(X)
