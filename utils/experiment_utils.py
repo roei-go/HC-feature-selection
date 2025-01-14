@@ -10,6 +10,8 @@ from collections import Counter
 import plotly
 import sklearn
 from lib.classifier_with_feature_selection import ClassifierFeatureSelection
+from scipy.spatial.distance import cdist
+
 
 def classifiers_hyper_tune(classifiers: list,
                            search_spaces: list,
@@ -160,10 +162,9 @@ def multiple_classifiers_fit_predict(classifiers,
                 # find the number of features from the number of non-zero coefficients
                 num_features[i] = np.count_nonzero(np.sum(np.abs(classifiers[i]['clf'].coef_), axis=0))
                 selected_features[i] = list(np.flatnonzero(np.sum(np.abs(classifiers[i]['clf'].coef_), axis=0)))
-            # most other sklearn classifiers has
+            # most other sklearn classifiers has 'n_features_in_'
             elif hasattr(classifiers[i]['clf'], 'n_features_in_'):
                 num_features[i] = classifiers[i]['clf'].n_features_in_
-
 
         if scaler_func is not None:
             X_test_s = scaler_func.transform(X_test)
@@ -357,7 +358,7 @@ def get_best_score_full_params(cv_results, param_values):
     return best_mean_score, best_score_params
 
 
-def calc_binary_classification_tpr_fpr(y_true,y_pred):
+def calc_binary_classification_tpr_fpr(y_true, y_pred):
     conf_mat = confusion_matrix(y_true, y_pred)
     tp = conf_mat[1, 1]
     fp = conf_mat[0, 1]
@@ -365,4 +366,33 @@ def calc_binary_classification_tpr_fpr(y_true,y_pred):
     tn = conf_mat[0, 0]
     tpr = tp / (tp + fn)
     fpr = fp / (tn + fp)
-    return tpr,fpr,conf_mat
+    return tpr, fpr, conf_mat
+
+
+def compute_inter_class_distances(data, num_samples_per_class):
+    """
+    Compute all pairwise inter-class Euclidean distances between samples in a numpy array.
+
+    Parameters:
+    - data: 2D numpy array where samples of different classes are arranged sequentially.
+    - num_samples_per_class: number of samples per class.
+
+    Returns:
+    - inter_class_distances - vector of size 0.5*N*(N-1)*num_samples_per_class distances. The distances are from each point in the data
+    to all other points not in the same class
+    """
+    num_samples = data.shape[0]
+    num_classes = num_samples // num_samples_per_class
+    inter_class_distances = []
+
+
+    # Iterate over all unique pairs of classes
+    for i in range(num_classes):
+        class_i = data[i * num_samples_per_class:(i + 1) * num_samples_per_class, :]
+        for j in range(i + 1, num_classes):
+            class_j = data[j * num_samples_per_class:(j + 1) * num_samples_per_class, :]
+            distances = cdist(class_i, class_j).flatten()  # Compute pairwise distances between class i and class j
+            inter_class_distances.append(distances)
+    inter_class_distances = np.concatenate(inter_class_distances, axis=0)
+
+    return inter_class_distances

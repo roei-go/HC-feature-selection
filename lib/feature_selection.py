@@ -7,6 +7,7 @@ import warnings
 from scipy.signal import find_peaks_cwt, peak_prominences
 from scipy.stats import binom, norm
 
+
 def groups_f_stat(*groups, axis=0):
     f_stat, pval = f_oneway(*groups, axis=axis)
     # replace NaNs in the F statistic with zeros
@@ -82,24 +83,24 @@ class MultiTestCdfNorm(MultiTest):
         assert not np.isnan(pvals).any(), "in MultiTestCdfNorm, passed p-values vector has null values"
         self._pvals = np.sort(np.unique(pvals.copy()))
         self._N = len(self._pvals)
-        #self._uu = np.linspace(np.min(self._pvals), np.max(self._pvals), self._N)
+        # self._uu = np.linspace(np.min(self._pvals), np.max(self._pvals), self._N)
         self._uu = np.linspace(1 / self._N, 1, self._N)
 
-        #bins = np.histogram_bin_edges(pvals, bins=self._N, range=(0.0, 1.0), weights=None)
-        hist, bins = np.histogram(self._pvals, bins=[0]+list(self._uu))
-        self.cdf = np.cumsum((1/self._N) * hist)
+        # bins = np.histogram_bin_edges(pvals, bins=self._N, range=(0.0, 1.0), weights=None)
+        hist, bins = np.histogram(self._pvals, bins=[0] + list(self._uu))
+        self.cdf = np.cumsum((1 / self._N) * hist)
 
         # version 1
-        #self._zz = np.sqrt(self._N) * (self._uu - self._pvals) / cdf
+        # self._zz = np.sqrt(self._N) * (self._uu - self._pvals) / cdf
 
-        self.hc_obj_pvals = ((self._uu[:-1] - self._pvals[:-1])/np.sqrt(self._pvals[:-1] * (1-self._pvals[:-1])))
-        self.hc_obj_cdf = (self.cdf[:-1] - self._uu[:-1]) / np.sqrt(self.cdf[:-1] * (1-self.cdf[:-1]))
-        self.pvals_inv_std = 1/np.sqrt(self._pvals[:-1] * (1-self._pvals[:-1]))
+        self.hc_obj_pvals = ((self._uu[:-1] - self._pvals[:-1]) / np.sqrt(self._pvals[:-1] * (1 - self._pvals[:-1])))
+        self.hc_obj_cdf = (self.cdf[:-1] - self._uu[:-1]) / np.sqrt(self.cdf[:-1] * (1 - self.cdf[:-1]))
+        self.pvals_inv_std = 1 / np.sqrt(self._pvals[:-1] * (1 - self._pvals[:-1]))
 
         # version 2
         self._zz = np.sqrt(self._N) * self.pvals_inv_std * self.hc_obj_cdf
-        #self._zz = np.sqrt(self._N) * np.sqrt((self.cdf[:-1] - self._uu[:-1])**2) / np.sqrt(self.cdf[:-1] * (1-self.cdf[:-1]))
-        self._imin_star = np.argmax(self._pvals > (1 - 1/self._N) / self._N)
+        # self._zz = np.sqrt(self._N) * np.sqrt((self.cdf[:-1] - self._uu[:-1])**2) / np.sqrt(self.cdf[:-1] * (1-self.cdf[:-1]))
+        self._imin_star = np.argmax(self._pvals > (1 - 1 / self._N) / self._N)
         self._imin_jin = np.argmax(self._pvals > np.log(self._N) / self._N)
 
     def _calculate_hc(self, imin, imax):
@@ -112,6 +113,7 @@ class MultiTestCdfNorm(MultiTest):
         zMaxStar = self._zz[self.i_cdf]
         self._istar = int(self._N * self.cdf[self.i_cdf])
         return zMaxStar, self._pvals[self._istar]
+
 
 class hc2(FeatureSelectionBase):
     def __init__(self, feature_selector, num_resampling: int, num_samples_per_class: int, hc_gamma=0.2, hc_stbl=False, hc_method='star'):
@@ -130,15 +132,15 @@ class hc2(FeatureSelectionBase):
         self.selection_pvalues = None
         self.num_features_selected_in_sample = []
 
-
     def fit(self, X, y):
         self.num_selections = np.zeros((X.shape[1],))
         self.num_features_selected_in_sample = []
         # using bootstrap (resampling with replacement), generate multiple datasets from the given single dataset
-        cls_idx = {label : np.flatnonzero(y == label) for label in list(np.unique(y))}
+        cls_idx = {label: np.flatnonzero(y == label) for label in list(np.unique(y))}
 
         for i in range(self.num_resampling):
-            X_bootstrap = np.concatenate([X[np.random.choice(cls_idx[label], size=self.num_samples_per_class, replace=False), :] for label in cls_idx.keys()])
+            X_bootstrap = np.concatenate(
+                [X[np.random.choice(cls_idx[label], size=self.num_samples_per_class, replace=False), :] for label in cls_idx.keys()])
             y_bootstrap = np.concatenate([np.repeat(label, self.num_samples_per_class) for label in cls_idx.keys()])
             fs = self.feature_selector(hc_gamma=self.hc_gamma, hc_stbl=self.hc_stbl, hc_method=self.hc_method)
             fs.fit(X_bootstrap, y_bootstrap)
@@ -147,15 +149,15 @@ class hc2(FeatureSelectionBase):
                 self.num_features_selected_in_sample.append(len(fs.selected_features))
 
         # approximating a poisson-binomial distribution with normal variables
-        experiments_success_prob = np.array(self.num_features_selected_in_sample)/X.shape[1]
+        experiments_success_prob = np.array(self.num_features_selected_in_sample) / X.shape[1]
         self.mu = np.sum(experiments_success_prob)
-        self.std = np.sqrt(np.sum(experiments_success_prob * (1-experiments_success_prob)))
-        #binomial_rv = binom(n=self.num_resampling, p=self.hc_gamma)
+        self.std = np.sqrt(np.sum(experiments_success_prob * (1 - experiments_success_prob)))
+        # binomial_rv = binom(n=self.num_resampling, p=self.hc_gamma)
         normal_dist = norm(loc=self.mu, scale=self.std)
         self.selection_pvalues = normal_dist.sf(self.num_selections)
         self.mt = MultiTest(self.selection_pvalues, stbl=self.hc_stbl)
         self.hc_obj = self.mt._zz
-        
+
         if self.hc_method == 'star':
             self.hc, self.hct = self.mt.hc_star(gamma=self.hc_gamma)
         elif self.hc_method == 'jin':
@@ -165,7 +167,7 @@ class hc2(FeatureSelectionBase):
 
         self.selected_features = np.flatnonzero(self.selection_pvalues <= self.hct)
         return self
-        
+
 
 class FeatureSelectionDiversityPursuitAnova(FeatureSelectionBase):
 
@@ -191,7 +193,8 @@ class FeatureSelectionDiversityPursuitAnova(FeatureSelectionBase):
         self.use_emp_cdf_in_hc_obj = use_emp_cdf_in_hc_obj
         self.num_features = None
         self.verbosity = verbosity
-        assert self.hc_method in ['star', 'jin', 'hc', 'bj','take_all_below_gamma'], "HC method must be in ['hc', 'star', 'jin', 'bj','take_all_below_gamma']"
+        assert self.hc_method in ['star', 'jin', 'hc', 'bj',
+                                  'take_all_below_gamma'], "HC method must be in ['hc', 'star', 'jin', 'bj','take_all_below_gamma']"
 
     def get_max_z_score_under_null(self, p, num_null_pvals_vectors, hc_stbl, hc_gamma):
         max_z_scores = []
@@ -202,7 +205,6 @@ class FeatureSelectionDiversityPursuitAnova(FeatureSelectionBase):
             max_z_scores.append(max_z_score)
         valid_z_score_thd = np.percentile(max_z_scores, 50)
         return max_z_scores, valid_z_score_thd
-
 
     def apply_hc(self, pvalues):
         """
@@ -336,6 +338,7 @@ class FeatureSelectionDiversityPursuitPermutation(FeatureSelectionDiversityPursu
         if self.transformer is not None:
             groups_for_test = [self.transformer.fit_transform(group) for group in groups_for_test]
         res = permutation_test(groups_for_test, groups_f_stat, n_resamples=self.n_resamples, vectorized=True, alternative='greater',
+                               axis=0,
                                permutation_type='independent')
         features_for_test_f_stat, features_for_test_pvals = res.statistic, res.pvalue
         return features_for_test_f_stat, features_for_test_pvals, inf_f_stat_idx, nan_f_stat_idx, features_for_test_idx
@@ -464,18 +467,17 @@ class FeatureSelectionOneVsAllAnova(FeatureSelectionDiversityPursuitAnova):
 
 class FeatureSelectionOneVsAllKS(FeatureSelectionOneVsAllAnova):
     def test_func(self, groups):
-        num_features = groups[0].shape[1]
-        # init arrays for f_stat, pvals
-        stat = np.zeros((num_features,))
-        pvals = np.ones((num_features,))
-        for j in range(num_features):
-            samples = [np.squeeze(group[:, j]) for group in groups]
-            res = ks_2samp(*samples)
-            stat[j], pvals[j] = res.statistic, res.pvalue
+        
+        res = ks_2samp(*groups)
+        stat, pvals = res.statistic, res.pvalue
 
-        inf_stat_idx = np.isinf(stat)
-        nan_stat_idx = np.isnan(stat)
+        inf_stat_idx = (np.nonzero(np.isinf(stat).astype(int))[0]).tolist()
+        nan_stat_idx = (np.nonzero(np.isnan(stat).astype(int))[0]).tolist()
+        if self.verbosity:
+            print(f"inf_stat_idx = {inf_stat_idx}")
+            print(f"nan_stat_idx = {nan_stat_idx}")
         features_for_test_idx = np.array(list(set(range(self.num_features)) - set(inf_stat_idx) - set(nan_stat_idx)))
         features_for_test_stat = stat[features_for_test_idx]
         features_for_test_pvals = pvals[features_for_test_idx]
+
         return features_for_test_stat, features_for_test_pvals, inf_stat_idx, nan_stat_idx, features_for_test_idx
